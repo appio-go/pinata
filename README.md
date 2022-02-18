@@ -1,0 +1,2 @@
+# pinata
+Pinata IPFS uploader
