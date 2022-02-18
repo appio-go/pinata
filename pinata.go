@@ -2,12 +2,14 @@ package pinata
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"io/ioutil"
 	"mime/multipart"
 	"net/http"
 	"os"
 	fp "path/filepath"
+	"strings"
 	"time"
 )
 
@@ -16,24 +18,31 @@ const (
 )
 
 type Pinata struct {
-	apiKey string
-	secret string
+	Bearer string
 }
 
 type Response struct {
 	IpfsHash  string `json:"IpfsHash"`
-	PinSize   string `json:"PinSize"`
-	Timestamp int64  `json:"Timestamp"`
+	PinSize   int64  `json:"PinSize"`
+	Timestamp string `json:"Timestamp"`
+}
+
+type Error struct {
+	Error struct {
+		Reason  string `json:"reason"`
+		Details string `json:"details"`
+	} `json:"error"`
 }
 
 func (p *Pinata) SetKeys() {
-	p.apiKey, _ = os.LookupEnv("PINATA_APIKEY")
-	p.secret, _ = os.LookupEnv("PINATA_APISECRET")
+	p.Bearer, _ = os.LookupEnv("PINATA_APIKEY")
 }
 
 //PinFile - upload file to IPFS
 func (p *Pinata) PinFile(filepath string) (Response, error) {
+	p.SetKeys()
 	file, err := os.Open(filepath)
+
 	if err != nil {
 		return Response{}, err
 	}
@@ -47,6 +56,7 @@ func (p *Pinata) PinFile(filepath string) (Response, error) {
 		defer func() { _ = m.Close() }()
 
 		part, err := m.CreateFormFile("file", fp.Base(file.Name()))
+
 		if err != nil {
 			return
 		}
@@ -63,8 +73,7 @@ func (p *Pinata) PinFile(filepath string) (Response, error) {
 	}
 
 	req.Header.Add("Content-Type", m.FormDataContentType())
-	req.Header.Add("pinata_secret_api_key", p.apiKey)
-	req.Header.Add("pinata_api_key", p.secret)
+	req.Header.Add("Authorization", "Bearer "+p.Bearer)
 
 	client := &http.Client{
 		Timeout: 30 * time.Second,
@@ -78,6 +87,15 @@ func (p *Pinata) PinFile(filepath string) (Response, error) {
 	data, err := ioutil.ReadAll(resp.Body)
 	if err != nil {
 		return Response{}, err
+	}
+
+	if strings.Contains(string(data), "error") {
+		var error Error
+		if err := json.Unmarshal(data, &error); err != nil {
+			return Response{}, err
+		}
+
+		return Response{}, errors.New(error.Error.Details)
 	}
 
 	var ret Response
